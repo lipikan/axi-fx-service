@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/apikit" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/apikit http://www.mulesoft.org/schema/mule/apikit/current/mule-apikit.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.1.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd">
+    <http:listener-config name="fx-api-httpListenerConfig" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration"/>
+    <apikit:config name="fx-api-config" raml="fx-api.raml" consoleEnabled="false" doc:name="Router"/>
+	<http:request-config name="HTTP_Request_Configuration" host="${fixerBaseUrl}" port="80" doc:name="HTTP Request Configuration"/>
+	<db:template-query name="Template_Query" doc:name="Template Query">
+		<db:parameterized-query><![CDATA[insert into fx_quotes (ID, DATE_CREATED, FX_PAIR, FX_RATE, BUY_AMOUNT, SELL_AMOUNT) values (:id, :dateCreated, :fxPair, :fxRate,:buyAmount, :sellAmount)]]></db:parameterized-query>
+		<db:in-param name="dateCreated" defaultValue="&quot;test&quot;"/>
+		<db:in-param name="fxPair" defaultValue="&quot;test&quot;"/>
+		<db:in-param name="buyAmount" defaultValue="0"/>
+		<db:in-param name="sellAmount" defaultValue="0"/>
+		<db:in-param name="fxRate" defaultValue="0"/>
+		<db:in-param name="id" defaultValue="0"/>
+	</db:template-query>
+    <flow name="fx-api-main">
+        <http:listener config-ref="fx-api-httpListenerConfig" path="/api/*" doc:name="HTTP"/>
+        <apikit:router config-ref="fx-api-config" doc:name="APIkit Router"/>
+        <exception-strategy ref="fx-api-apiKitGlobalExceptionMapping" doc:name="Reference Exception Strategy"/>
+    </flow>
+    <flow name="fx-api-console">
+        <http:listener config-ref="fx-api-httpListenerConfig" path="/console/*" doc:name="HTTP"/>
+        <apikit:console config-ref="fx-api-config" doc:name="APIkit Console"/>
+    </flow>
+    <flow name="put:/quotes/{quoteId}:application/json:fx-api-config">
+		<byte-array-to-string-transformer doc:name="Byte Array to String"/>
+		<set-variable variableName="quoteId" value="#[message.inboundProperties.'http.uri.params'.quoteId]" doc:name="set quote Id"/>
+		<dw:transform-message doc:name="Transform Message">
+			<dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+payload]]></dw:set-payload>
+		</dw:transform-message>
+		<set-variable variableName="request" value="#[payload]" doc:name="Set request"/>
+		<db:update config-ref="Generic_Database_Configuration1" doc:name="Database">
+			<db:parameterized-query><![CDATA[Update Fx_Quotes SET FX_RATE = #[payload.fxRate], FX_PAIR = #[payload.fxPair], BUY_AMOUNT = #[payload.buyAmount], SELL_AMOUNT = #[payload.sellAmount] where ID = #[flowVars.quoteId]]]></db:parameterized-query>
+		</db:update>
+		<dw:transform-message doc:name="response">
+			<dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	buyAmount: flowVars.request.buyAmount,
+	fxPair: flowVars.request.fxPair,
+	fxRate: flowVars.request.fxRate,
+	id: flowVars.quoteId,
+	sellAmount: flowVars.request.sellAmount
+}]]></dw:set-payload>
+		</dw:transform-message>
+		<exception-strategy ref="Global_Choice_Exception_Strategy" doc:name="Reference Exception Strategy"/>
+    </flow>
+    <flow name="get:/quotes/{quoteId}:fx-api-config">
+		<set-variable variableName="quoteId" value="#[message.inboundProperties.'http.uri.params'.quoteId]" doc:name="set quote Id"/>
+		<db:select config-ref="Generic_Database_Configuration1" doc:name="Query quotes by Id">
+			<db:parameterized-query><![CDATA[Select * from fx_quotes where id = #[flowVars.quoteId]]]></db:parameterized-query>
+		</db:select>
+		<dw:transform-message doc:name="Transform Message">
+			<dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+{
+	buyAmount: payload[0].BUY_AMOUNT as :number,
+	fxPair: payload[0].FX_PAIR,
+	fxRate: payload[0].FX_RATE as :number,
+	id: payload[0].ID,
+	sellAmount: payload[0].SELL_AMOUNT as :number,
+	timestamp: payload[0].DATE_CREATED
+}]]></dw:set-payload>
+		</dw:transform-message>
+		<exception-strategy ref="Global_Choice_Exception_Strategy" doc:name="Reference Exception Strategy"/>
+    </flow>
+    <flow name="post:/quotes:application/json:fx-api-config">
+		<dw:transform-message doc:name="set all required vars">
+			<dw:set-variable resource="classpath:store-sell-currency-to-var.dwl" variableName="sellCurrency"/>
+			<dw:set-variable resource="classpath:store-buyCurrency-to-var.dwl" variableName="buyCurrency"/>
+			<dw:set-variable resource="classpath:store-sellAmount-to-var.dwl" variableName="sellAmount"/>
+			<dw:set-variable resource="classpath:store-buyAmount-to-var.dwl" variableName="buyAmount"/>
+		</dw:transform-message>
+		<http:request config-ref="HTTP_Request_Configuration" path="${fixerGetExchangeRate}" method="GET" doc:name="HTTP Request to Fixer">
+			<http:request-builder>
+				<http:query-param paramName="access_key" value="${accessKey}"/>
+				<http:query-param paramName="symbols" value="#[flowVars.sellCurrency], #[flowVars.buyCurrency]"/>
+			</http:request-builder>
+		</http:request>
+		<byte-array-to-string-transformer doc:name="Byte Array to String"/>
+		<dw:transform-message doc:name="Extract baseRate" metadata:id="82c8b1df-fa7d-4d06-bda2-5c8d3dcb59ed">
+			<dw:input-payload mimeType="application/json" doc:sample="sample-fixer-response.json"/>
+			<dw:input-variable doc:sample="sample_data/string.dwl" mimeType="application/java" variableName="buyCurrency"/>
+			<dw:set-variable resource="classpath:store-buy-currency-in-var.dwl" variableName="baseRate"/>
+		</dw:transform-message>
+		<dw:transform-message doc:name="Calculate fxRate">
+			<dw:set-variable resource="classpath:calculate-fxRate.dwl" variableName="fxRate"/>
+		</dw:transform-message>
+		<set-variable variableName="id" value="#[java.util.UUID.randomUUID().toString()]" doc:name="Variable"/>
+		<dw:transform-message doc:name="create fx quote">
+			<dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+{
+	id: flowVars.id,
+	fxRate: flowVars.fxRate,
+	dateCreated: now as :string{format: "YYYY-MM-dd hh:mm:ss"},
+	sellAmount: flowVars.buyAmount / flowVars.fxRate when flowVars.buyAmount != null otherwise 0,
+	buyAmount: flowVars.sellAmount * flowVars.fxRate when flowVars.sellAmount != null otherwise 0,
+	fxPair: flowVars.buyCurrency ++ "/" ++ flowVars.sellCurrency ++ "=" ++ flowVars.baseRate
+}]]></dw:set-payload>
+		</dw:transform-message>
+		<set-variable variableName="response" value="#[payload]" doc:name="set response"/>
+		<db:insert config-ref="Generic_Database_Configuration1" doc:name="Database">
+			<db:template-query-ref name="Template_Query"/>
+			<db:in-param name="dateCreated" value="#[payload.dateCreated]"/>
+			<db:in-param name="fxPair" value="#[payload.fxPair]"/>
+			<db:in-param name="fxRate" value="#[payload.fxRate]"/>
+			<db:in-param name="buyAmount" value="#[payload.buyAmount]"/>
+			<db:in-param name="sellAmount" value="#[payload.sellAmount]"/>
+			<db:in-param name="id" value="#[payload.id]"/>
+		</db:insert>
+		<logger message="#[payload]" level="INFO" doc:name="Logger"/>
+		<set-payload value="#[flowVars.response]" doc:name="Set Payload"/>
+		<exception-strategy ref="Global_Choice_Exception_Strategy" doc:name="Reference Exception Strategy"/>
+    </flow>
+    <apikit:mapping-exception-strategy name="fx-api-apiKitGlobalExceptionMapping">
+        <apikit:mapping statusCode="404">
+            <apikit:exception value="org.mule.module.apikit.exception.NotFoundException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Resource not found&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="405">
+            <apikit:exception value="org.mule.module.apikit.exception.MethodNotAllowedException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Method not allowed&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="415">
+            <apikit:exception value="org.mule.module.apikit.exception.UnsupportedMediaTypeException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Unsupported media type&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="406">
+            <apikit:exception value="org.mule.module.apikit.exception.NotAcceptableException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Not acceptable&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="400">
+            <apikit:exception value="org.mule.module.apikit.exception.BadRequestException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Bad request&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+    </apikit:mapping-exception-strategy>
+</mule>

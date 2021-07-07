@@ -1,0 +1,63 @@
+#%RAML 1.0
+title: Axi FX API
+version: v2
+baseUri: http://axi.fx/v1/api
+mediaType: application/json
+types:
+    QuoteRequest:
+        type: object
+        properties:
+            buyCurrency: string
+            sellCurrency: string
+            buyAmount?: number
+            sellAmount?: number
+            
+    UpdateQuoteRequest:
+        type: object
+        properties:
+            fxPair: string
+            fxRate: number
+            buyAmount?: number
+            sellAmount?: number
+    
+    QuoteResponse:
+        type: object
+        properties:
+            id: string
+            timestamp: datetime
+            fxPair: string
+            fxRate: number
+            buyAmount?: number
+            sellAmount?: number
+
+/quotes:
+    description: Service to manage FX quotes
+    post:
+        description: Creates a new FX quote
+        body:
+          application/json:
+            type: QuoteRequest 
+        responses:
+          200:
+            body:
+              application/json:
+                type: QuoteResponse
+    
+    /{quoteId}:
+        get:
+            description: Retrieves an existing quote based on the quote id
+            responses:
+              200:
+                body:
+                  application/json:
+                    type: QuoteResponse
+        put:
+            description: Update an existing quote based on the quote id
+            body:
+                application/json:
+                    type: UpdateQuoteRequest
+            responses:
+              200:
+                body:
+                  application/json:
+                    type: QuoteResponse
